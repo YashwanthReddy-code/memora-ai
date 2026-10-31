@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
+import { API_URL } from '../config.js';
 
 const AppContext = createContext();
 
@@ -45,7 +46,7 @@ export const AppProvider = ({ children }) => {
   useEffect(() => {
     let eventSource;
     try {
-      eventSource = new EventSource('/api/stream');
+      eventSource = new EventSource(`${API_URL}/api/stream`);
 
       eventSource.onopen = () => {
         setSseConnected(true);

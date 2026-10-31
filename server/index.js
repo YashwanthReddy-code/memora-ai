@@ -25,7 +25,26 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+// Enable CORS for process.env.CLIENT_URL (comma-separated list, trim trailing slashes) or all origins if unset
+const allowedOrigins = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(',').map((u) => u.trim().replace(/\/+$/, '')).filter(Boolean)
+  : null;
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!allowedOrigins || allowedOrigins.length === 0 || !origin) {
+        return callback(null, true);
+      }
+      const trimmedOrigin = origin.trim().replace(/\/+$/, '');
+      if (allowedOrigins.includes(trimmedOrigin) || allowedOrigins.includes('*')) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS error: Origin ${origin} not allowed`));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 // API Routes
@@ -36,6 +55,11 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/stream', streamRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/seed', seedRoutes);
+
+// Deployment health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 
 // System Health & Diagnostics endpoint
 app.get('/api/health', (req, res) => {
