@@ -1,0 +1,22 @@
+{
+  "name": "memora-ai-workspace",
+  "version": "1.0.0",
+  "description": "Memora AI – Intelligent Memory Assistant (MongoDB Atlas + Gemini API + Vector Search + Change Streams)",
+  "scripts": {
+    "install:all": "cd server && npm install && cd ../client && npm install",
+    "build:client": "cd client && npm run build",
+    "start": "cd server && npm start",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev"
+  },
+  "keywords": [
+    "agentic-memory",
+    "mongodb-atlas",
+    "gemini-api",
+    "vector-search",
+    "change-streams",
+    "ttl-indexes"
+  ],
+  "author": "Memora AI Team"
+}
+
