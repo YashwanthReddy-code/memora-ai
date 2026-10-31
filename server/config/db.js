@@ -13,6 +13,7 @@ let changeStreamActive = false;
 let dbSource = 'none';
 let memoryServerInstance = null;
 let ttlInterval = null;
+let lastDbError = null;
 
 export const connectDB = async (customUri = null) => {
   const uri = customUri || process.env.MONGODB_URI?.trim();
@@ -25,21 +26,23 @@ export const connectDB = async (customUri = null) => {
 
       await mongoose.connect(uri, {
         dbName: 'memora_ai',
-        serverSelectionTimeoutMS: 10000,
+        serverSelectionTimeoutMS: 6000,
       });
 
       dbSource = isAtlas ? 'MongoDB Atlas' : 'Remote MongoDB';
+      lastDbError = null;
       console.log(`===============================================`);
       console.log(`  Connected successfully to ${dbSource}`);
       console.log(`  Database Name: ${mongoose.connection.name}`);
       console.log(`  Cluster Host:  ${mongoose.connection.host}`);
       console.log(`===============================================`);
     } catch (err) {
-      console.error(`\n[FATAL] Failed to connect to MongoDB Atlas at MONGODB_URI:`);
+      console.error(`\n[MongoDB Atlas Connection Error] Failed to connect to MongoDB Atlas at MONGODB_URI:`);
       console.error(`Error: ${err.message}`);
-      console.error(`Action required: Verify database user credentials, cluster URI, and Network Access (IP Whitelist 0.0.0.0/0) in MongoDB Atlas.\n`);
-      // Do NOT silently fall back to Embedded MongoDB when MONGODB_URI is specified
-      throw new Error(`MongoDB Atlas Connection Failed: ${err.message}`);
+      console.error(`Action required: Make sure your current IP (${process.env.CURRENT_IP || 'check your IP'}) is whitelisted in MongoDB Atlas Network Access (or set to 0.0.0.0/0 for unrestricted dev access).\n`);
+      dbSource = 'MongoDB Atlas (Connection Error - Whitelist IP)';
+      lastDbError = err.message;
+      console.log(`Starting web application in management mode so the UI and Settings page remain accessible.`);
     }
   } else {
     console.log('No external MONGODB_URI provided in server/.env. Starting persistent local MongoDB instance for development...');
@@ -128,8 +131,11 @@ const setupChangeStreams = () => {
       broadcastChange('CHANGE_STREAM_EVENT', eventPayload);
     });
 
-    memoryChangeStream.on('error', (err) => {
-      console.log(`[MongoDB ChangeStream Notice] Native watch() on standalone topology (${err.message}). Activating Mongoose Change Hook stream for 100% SSE parity.`);
+    memoryChangeStream.on('error', async (err) => {
+      console.log(`[MongoDB ChangeStream Notice] Native watch() closed (${err.message}). Activating Mongoose Change Hook stream for 100% SSE parity.`);
+      try {
+        await memoryChangeStream.close();
+      } catch (e) {}
       changeStreamActive = true;
     });
 
@@ -264,5 +270,6 @@ export const getDatabaseStatus = () => ({
   source: dbSource,
   databaseName: mongoose.connection.name || 'memora_ai',
   host: mongoose.connection.host || 'localhost',
-  changeStreamActive: true,
+  changeStreamActive: changeStreamActive,
+  error: lastDbError,
 });
