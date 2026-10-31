@@ -87,11 +87,12 @@ export const fetchAvailableModels = async (apiKey) => {
 
 /**
  * Resolve a verified, working model identifier that supports generateContent
+ * Actively probes candidates to ensure zero 404 errors at runtime
  */
 export const resolveSupportedModel = async (apiKey, requestedModel = null) => {
   const cleanKey = apiKey.trim();
 
-  // If already cached for this key, return cached model
+  // If already cached for this key and model, return cached model
   if (cachedKey === cleanKey && cachedVerifiedModel && (!requestedModel || requestedModel === cachedVerifiedModel)) {
     return cachedVerifiedModel;
   }
@@ -106,36 +107,59 @@ export const resolveSupportedModel = async (apiKey, requestedModel = null) => {
     throw new Error('No models supporting generateContent are available for this API key/project.');
   }
 
-  const availableNames = available.map(m => m.name.toLowerCase());
+  const genAI = cachedGenAI && cachedKey === cleanKey ? cachedGenAI : new GoogleGenerativeAI(cleanKey);
 
-  // Priority candidates to test if requested model is unavailable
+  // Priority candidate order for generation
   const candidatePreferences = [
     requestedModel,
     process.env.GEMINI_MODEL,
+    'gemini-flash-latest',
+    'gemini-flash-lite-latest',
+    'gemini-2.5-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-3-flash-preview',
     'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-exp',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash-002',
-    'gemini-1.5-flash-001',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro-latest',
-    'gemini-1.5-pro',
+    'gemini-pro-latest',
+    'gemini-2.5-pro',
+    ...available.map(m => m.name),
   ].filter(Boolean).map(sanitizeModelName);
 
-  for (const candidate of candidatePreferences) {
-    const candidateLower = candidate.toLowerCase();
-    const match = available.find(m => m.name.toLowerCase() === candidateLower);
-    if (match) {
-      cachedVerifiedModel = match.name;
-      return match.name;
+  const uniqueCandidates = [...new Set(candidatePreferences)];
+
+  let workingModel = null;
+  let lastError = null;
+
+  for (const candidate of uniqueCandidates) {
+    // Only test if candidate is in the available models returned by Google
+    const isAvailable = available.some(m => m.name.toLowerCase() === candidate.toLowerCase());
+    if (!isAvailable) continue;
+
+    try {
+      const model = genAI.getGenerativeModel({ model: candidate });
+      const result = await model.generateContent('ping');
+      await result.response;
+      workingModel = candidate;
+      console.log(`[Gemini Model Resolver] Successfully verified model: "${candidate}"`);
+      break;
+    } catch (candErr) {
+      lastError = candErr;
+      const msg = candErr.message || '';
+      console.warn(`[Gemini Model Resolver] Candidate "${candidate}" generation test failed: ${msg.slice(0, 100)}`);
+      if (candErr.code === 'API_KEY_INVALID' || msg.includes('API key not valid')) {
+        throw candErr;
+      }
     }
   }
 
-  // Fallback to first available model that supports generateContent
-  const fallback = available[0].name;
-  cachedVerifiedModel = fallback;
-  return fallback;
+  if (!workingModel) {
+    throw lastError || new Error('No available model responded to generateContent.');
+  }
+
+  cachedKey = cleanKey;
+  cachedGenAI = genAI;
+  cachedVerifiedModel = workingModel;
+  return workingModel;
 };
 
 /**
@@ -143,7 +167,7 @@ export const resolveSupportedModel = async (apiKey, requestedModel = null) => {
  */
 export const getGeminiClient = async () => {
   let apiKey = process.env.GEMINI_API_KEY?.trim();
-  let requestedModel = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
+  let requestedModel = process.env.GEMINI_MODEL?.trim() || 'gemini-flash-latest';
 
   try {
     const dbSetting = await Setting.findOne({ userId: 'default_user' });
@@ -210,32 +234,19 @@ export const testGeminiConnection = async (testKey, requestedModel = null) => {
       };
     }
 
-    // 2. Resolve the best model
-    const pref = requestedModel || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    // 2. Resolve working model by active ping verification
+    const pref = requestedModel || process.env.GEMINI_MODEL || 'gemini-flash-latest';
     const verifiedModel = await resolveSupportedModel(cleanKey, pref);
-
-    // 3. Test generation with the verified model
-    const genAI = new GoogleGenerativeAI(cleanKey);
-    const model = genAI.getGenerativeModel({ model: verifiedModel });
-    const result = await model.generateContent('ping');
-    const response = await result.response;
-    const text = response.text()?.trim() || 'OK';
-
-    // Update in-memory cache
-    cachedKey = cleanKey;
-    cachedGenAI = genAI;
-    cachedVerifiedModel = verifiedModel;
-    cachedAvailableModels = availableModels;
 
     return {
       success: true,
       message: `Gemini API verified successfully using model "${verifiedModel}".`,
       verifiedModel,
-      preview: text,
       availableModelsCount: availableModels.length,
-      availableModels: availableModels.slice(0, 10).map(m => m.name),
+      availableModels: availableModels.slice(0, 15).map(m => m.name),
     };
   } catch (err) {
+    console.error('[Gemini Connection Test Error]:', err);
     let userFriendlyMsg = err.message || 'Failed to authenticate with Gemini API';
 
     if (err.code === 'API_KEY_INVALID' || userFriendlyMsg.includes('API key not valid')) {
@@ -243,7 +254,7 @@ export const testGeminiConnection = async (testKey, requestedModel = null) => {
     } else if (err.code === 'QUOTA_EXCEEDED' || userFriendlyMsg.includes('quota') || userFriendlyMsg.includes('429')) {
       userFriendlyMsg = 'Gemini API quota or rate limit exceeded. Check your plan in Google Cloud Console.';
     } else if (userFriendlyMsg.includes('is not found') || userFriendlyMsg.includes('404')) {
-      userFriendlyMsg = `Model is not available for this API version. Verified models: ${cachedAvailableModels?.map(m => m.name).join(', ') || 'none'}`;
+      userFriendlyMsg = `Model was not found for this API version. Verified models available on your project: ${cachedAvailableModels?.map(m => m.name).slice(0, 5).join(', ') || 'none'}`;
     }
 
     return {

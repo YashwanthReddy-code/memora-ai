@@ -75,7 +75,7 @@ router.get('/', async (req, res) => {
         gemini: {
           configured: isConfigured,
           maskedKey: apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : null,
-          model: modelName || process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+          model: modelName || process.env.GEMINI_MODEL || 'gemini-flash-latest',
         },
       },
     });

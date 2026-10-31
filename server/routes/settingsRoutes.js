@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
       setting = await Setting.create({
         userId,
         geminiApiKey: envApiKey,
-        geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+        geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-latest',
         embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-004',
         similarityThreshold: parseFloat(process.env.SIMILARITY_THRESHOLD) || 0.65,
         topK: parseInt(process.env.TOP_K_MEMORIES) || 5,

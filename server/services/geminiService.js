@@ -100,7 +100,7 @@ JSON Schema:
 ]`;
 
   try {
-    let activeModel = modelName || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    let activeModel = modelName || process.env.GEMINI_MODEL || 'gemini-flash-latest';
     let model = client.getGenerativeModel({
       model: activeModel,
       generationConfig: {
@@ -284,7 +284,7 @@ export const generatePersonalizedResponse = async (
   const personaPrompt = systemPersona ||
     `You are Memora AI, an intelligent agent with persistent memory. You naturally recall relevant past details, preferences, and facts about the user.`;
 
-  let activeModel = modelName || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  let activeModel = modelName || process.env.GEMINI_MODEL || 'gemini-flash-latest';
 
   try {
     let model = client.getGenerativeModel({

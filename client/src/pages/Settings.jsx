@@ -27,7 +27,8 @@ export const Settings = () => {
   const [geminiTestResult, setGeminiTestResult] = useState(null);
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [hasExistingKey, setHasExistingKey] = useState(false);
-  const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash');
+  const [geminiModel, setGeminiModel] = useState('gemini-flash-latest');
+  const [discoveredModels, setDiscoveredModels] = useState([]);
 
   // MongoDB state
   const [mongodbUri, setMongodbUri] = useState('');
@@ -117,6 +118,9 @@ export const Settings = () => {
       if (res.success) {
         if (res.verifiedModel) {
           setGeminiModel(res.verifiedModel);
+        }
+        if (Array.isArray(res.availableModels) && res.availableModels.length > 0) {
+          setDiscoveredModels(res.availableModels);
         }
         addNotification(res.message || 'Gemini API verified successfully!', 'success');
       } else {
@@ -348,12 +352,19 @@ export const Settings = () => {
                 onChange={(e) => setGeminiModel(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none focus:border-indigo-500"
               >
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended - Stable & Fast)</option>
-                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                <option value="gemini-1.5-flash-latest">Gemini 1.5 Flash Latest</option>
-                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
-                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                <option value="gemini-flash-latest">Gemini Flash Latest (Recommended - Stable & Fast)</option>
+                <option value="gemini-flash-lite-latest">Gemini Flash Lite Latest (Ultra Fast & Low Latency)</option>
+                <option value="gemini-pro-latest">Gemini Pro Latest (Deep Reasoning)</option>
+                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                {discoveredModels
+                  .filter(m => !['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-pro-latest', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-pro'].includes(m))
+                  .map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))
+                }
               </select>
             </div>
 
