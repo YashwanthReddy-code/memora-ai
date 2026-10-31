@@ -12,10 +12,10 @@ async function reembed() {
 
   let count = 0;
   for (const mem of active) {
-    if (!mem.embedding || mem.embedding.length !== 3072) {
+    if (!mem.embedding || mem.embedding.length !== 768) {
       console.log(`Re-embedding [${mem.category}]: "${mem.content.slice(0, 50)}..."`);
       const emb = await generateEmbedding(mem.content);
-      if (emb && emb.length === 3072) {
+      if (emb && emb.length === 768) {
         mem.embedding = emb;
         await mem.save();
         count++;
@@ -23,8 +23,9 @@ async function reembed() {
     }
   }
 
-  console.log(`Done! Re-embedded ${count} memories with 3072-dimensional Gemini embeddings.`);
+  console.log(`Done! Re-embedded ${count} memories with 768-dimensional Gemini embeddings.`);
   await mongoose.disconnect();
 }
 
 reembed().catch(console.error);
+

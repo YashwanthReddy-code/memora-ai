@@ -50,9 +50,15 @@ export const generateEmbedding = async (text) => {
   for (const mName of candidateModels) {
     try {
       const model = client.getGenerativeModel({ model: mName });
-      const result = await model.embedContent(text);
-      if (result?.embedding?.values && result.embedding.values.length > 0) {
+      const result = await model.embedContent({
+        content: { parts: [{ text }] },
+        outputDimensionality: 768,
+      });
+      if (result?.embedding?.values && result.embedding.values.length === 768) {
         return result.embedding.values;
+      }
+      if (result?.embedding?.values && result.embedding.values.length > 0) {
+        return result.embedding.values.slice(0, 768);
       }
     } catch (err) {
       // Try next candidate model
