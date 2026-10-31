@@ -1,5 +1,16 @@
 const API_BASE = '/api';
 
+const toQueryString = (params = {}) => {
+  const clean = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '' && v !== 'undefined' && v !== 'null') {
+      clean[k] = v;
+    }
+  }
+  const qs = new URLSearchParams(clean).toString();
+  return qs ? `?${qs}` : '';
+};
+
 const handleResponse = async (res) => {
   if (!res.ok) {
     let errorMsg = `HTTP Error ${res.status}`;
@@ -19,10 +30,7 @@ export const api = {
   getStats: () => fetch(`${API_BASE}/stats`).then(handleResponse),
 
   // Memories
-  getMemories: (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
-    return fetch(`${API_BASE}/memories?${qs}`).then(handleResponse);
-  },
+  getMemories: (params = {}) => fetch(`${API_BASE}/memories${toQueryString(params)}`).then(handleResponse),
   getMemoryById: (id) => fetch(`${API_BASE}/memories/${id}`).then(handleResponse),
   createMemory: (data) =>
     fetch(`${API_BASE}/memories`, {
@@ -63,10 +71,7 @@ export const api = {
     }).then(handleResponse),
 
   // History & Audit
-  getHistory: (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
-    return fetch(`${API_BASE}/history?${qs}`).then(handleResponse);
-  },
+  getHistory: (params = {}) => fetch(`${API_BASE}/history${toQueryString(params)}`).then(handleResponse),
   clearHistory: () =>
     fetch(`${API_BASE}/history/clear`, {
       method: 'DELETE',

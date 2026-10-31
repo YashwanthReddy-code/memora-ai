@@ -19,11 +19,11 @@ router.get('/', async (req, res) => {
 
     const query = { userId };
 
-    if (action && action !== 'all') {
+    if (action && action !== 'all' && action !== 'undefined' && action !== 'null') {
       query.action = action;
     }
 
-    if (memoryId) {
+    if (memoryId && memoryId !== 'undefined' && memoryId !== 'null') {
       query.memoryId = memoryId;
     }
 

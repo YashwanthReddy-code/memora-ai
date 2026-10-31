@@ -26,15 +26,15 @@ router.get('/', async (req, res) => {
 
     const query = { userId };
 
-    if (status && status !== 'all') {
+    if (status && status !== 'all' && status !== 'undefined' && status !== 'null') {
       query.status = status;
     }
 
-    if (category && category !== 'all') {
+    if (category && category !== 'all' && category !== 'undefined' && category !== 'null') {
       query.category = category;
     }
 
-    if (search && search.trim()) {
+    if (search && search.trim() && search !== 'undefined' && search !== 'null') {
       const searchRegex = new RegExp(search.trim(), 'i');
       query.$or = [
         { content: searchRegex },

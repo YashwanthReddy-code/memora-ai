@@ -27,7 +27,8 @@ export const Settings = () => {
   const [geminiTestResult, setGeminiTestResult] = useState(null);
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [hasExistingKey, setHasExistingKey] = useState(false);
-  const [geminiModel, setGeminiModel] = useState('gemini-flash-latest');
+  const [geminiModel, setGeminiModel] = useState('gemini-flash-lite-latest');
+  const [embeddingModel, setEmbeddingModel] = useState('gemini-embedding-001');
   const [discoveredModels, setDiscoveredModels] = useState([]);
 
   // MongoDB state
@@ -56,7 +57,8 @@ export const Settings = () => {
         setHasExistingKey(data.hasGeminiApiKey);
         setHasExistingMongoUri(data.hasMongodbUri);
         setDatabaseSource(data.databaseStatus?.source || 'none');
-        setGeminiModel(data.geminiModel || 'gemini-2.5-flash');
+        setGeminiModel(data.geminiModel || 'gemini-flash-lite-latest');
+        setEmbeddingModel(data.embeddingModel || 'gemini-embedding-001');
         setSimilarityThreshold(data.similarityThreshold ?? 0.65);
         setTopK(data.topK ?? 5);
         setDefaultTtlHours(data.defaultTtlHours ?? 0);
@@ -294,7 +296,7 @@ export const Settings = () => {
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-white">Google Gemini API</h3>
-                <p className="text-xs text-slate-400">Powers cloud generative responses and text-embedding-004</p>
+                <p className="text-xs text-slate-400">Powers cloud generative responses and semantic embeddings</p>
               </div>
             </div>
             {hasExistingKey ? (
@@ -352,15 +354,15 @@ export const Settings = () => {
                 onChange={(e) => setGeminiModel(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none focus:border-indigo-500"
               >
-                <option value="gemini-flash-latest">Gemini Flash Latest (Recommended - Stable & Fast)</option>
-                <option value="gemini-flash-lite-latest">Gemini Flash Lite Latest (Ultra Fast & Low Latency)</option>
+                <option value="gemini-flash-lite-latest">Gemini Flash Lite Latest (Recommended - Stable & Fast)</option>
+                <option value="gemini-flash-latest">Gemini Flash Latest</option>
                 <option value="gemini-pro-latest">Gemini Pro Latest (Deep Reasoning)</option>
                 <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
                 <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
                 <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
                 {discoveredModels
-                  .filter(m => !['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-pro-latest', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-pro'].includes(m))
+                  .filter(m => !['gemini-flash-lite-latest', 'gemini-flash-latest', 'gemini-pro-latest', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-pro'].includes(m))
                   .map(m => (
                     <option key={m} value={m}>{m}</option>
                   ))
@@ -372,8 +374,8 @@ export const Settings = () => {
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
                 Embedding Model
               </label>
-              <div className="px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 text-xs font-mono">
-                text-embedding-004 (768 dimensions)
+              <div className="px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 text-xs font-mono">
+                {embeddingModel || 'gemini-embedding-001'} (3072 dimensions)
               </div>
             </div>
           </div>
