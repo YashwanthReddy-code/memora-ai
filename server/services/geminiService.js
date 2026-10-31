@@ -30,7 +30,7 @@ const generateFallbackEmbedding = (text) => {
 };
 
 /**
- * Generate 768-dimensional vector embedding for a given text using text-embedding-004
+ * Generate dense vector embedding for a given text using verified Gemini embedding models
  */
 export const generateEmbedding = async (text) => {
   if (!text || typeof text !== 'string') return generateFallbackEmbedding('empty');
@@ -40,17 +40,27 @@ export const generateEmbedding = async (text) => {
     return generateFallbackEmbedding(text);
   }
 
-  try {
-    const model = client.getGenerativeModel({ model: 'text-embedding-004' });
-    const result = await model.embedContent(text);
-    if (result?.embedding?.values && result.embedding.values.length > 0) {
-      return result.embedding.values;
+  const candidateModels = [
+    process.env.EMBEDDING_MODEL,
+    'gemini-embedding-001',
+    'gemini-embedding-2',
+    'text-embedding-004',
+  ].filter(Boolean);
+
+  for (const mName of candidateModels) {
+    try {
+      const model = client.getGenerativeModel({ model: mName });
+      const result = await model.embedContent(text);
+      if (result?.embedding?.values && result.embedding.values.length > 0) {
+        return result.embedding.values;
+      }
+    } catch (err) {
+      // Try next candidate model
     }
-    return generateFallbackEmbedding(text);
-  } catch (err) {
-    console.warn(`[Gemini Embedding Notice] Falling back to local vector representation: ${err.message}`);
-    return generateFallbackEmbedding(text);
   }
+
+  console.warn(`[Gemini Embedding Notice] Falling back to local vector representation.`);
+  return generateFallbackEmbedding(text);
 };
 
 /**

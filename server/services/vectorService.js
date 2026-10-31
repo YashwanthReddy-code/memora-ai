@@ -21,16 +21,21 @@ const computeCosineSimilarity = (vecA, vecB) => {
 
 /**
  * Perform semantic search for relevant memories
- * Supports MongoDB Atlas $vectorSearch with seamless cosine similarity fallback
+ * Supports MongoDB Atlas $vectorSearch with hybrid lexical, profile-recall, and cosine similarity fallback
  */
 export const searchMemories = async ({
   userId = 'default_user',
   queryEmbedding,
   queryText = '',
   topK = 5,
-  similarityThreshold = 0.65,
+  similarityThreshold = 0.50,
   category = null,
 }) => {
+  const cleanQuery = (queryText || '').toLowerCase().trim();
+
+  // Detect self-referential / user identity inquiries (e.g. "what do you know about me?", "who am I?")
+  const isProfileRecall = /(who am i|what do you know about me|tell me about me|my name|about me|do you remember me|what do you remember|my preferences|my details|my background|who i am|what have i told you)/i.test(cleanQuery);
+
   // Strategy 1: Attempt MongoDB Atlas $vectorSearch Aggregation Pipeline
   if (queryEmbedding && queryEmbedding.length > 0) {
     try {
@@ -71,27 +76,28 @@ export const searchMemories = async ({
 
       const results = await Memory.aggregate(pipeline);
       if (results && results.length > 0) {
-        console.log(`[Vector Search] Atlas $vectorSearch returned ${results.length} memories`);
-        return results
-          .filter(r => (r.score ?? 1) >= similarityThreshold)
-          .slice(0, topK)
-          .map(r => ({ ...r, similarityScore: Number((r.score ?? 1).toFixed(4)), searchMethod: 'atlas_vector_search' }));
+        const threshold = isProfileRecall ? 0.35 : similarityThreshold;
+        const filtered = results.filter(r => (r.score ?? 1) >= threshold);
+        if (filtered.length > 0) {
+          console.log(`[Vector Search] Atlas $vectorSearch returned ${filtered.length} memories`);
+          return filtered
+            .slice(0, topK)
+            .map(r => ({ ...r, similarityScore: Number((r.score ?? 1).toFixed(4)), searchMethod: 'atlas_vector_search' }));
+        }
       }
     } catch (atlasErr) {
-      // Atlas $vectorSearch will throw if index 'vector_index' is not built yet or if on standalone/replica set.
-      // This is expected and handled gracefully by Strategy 2!
-      console.log(`[Vector Search] Falling back to cosine similarity pipeline (${atlasErr.message.slice(0, 80)}...)`);
+      // Atlas $vectorSearch falls back smoothly to Hybrid in-memory search
     }
   }
 
-  // Strategy 2: Resilient In-Database Cosine Similarity Fallback
+  // Strategy 2: Resilient In-Database Hybrid Semantic + Lexical Search
   const query = {
     userId,
     status: 'active',
   };
   if (category) query.category = category;
 
-  // Check TTL: filter out already expired memories if MongoDB TTL runner has not cleaned yet
+  // Check TTL: filter out already expired memories
   query.$or = [
     { expiresAt: null },
     { expiresAt: { $gt: new Date() } },
@@ -103,47 +109,74 @@ export const searchMemories = async ({
     return [];
   }
 
-  if (queryEmbedding && queryEmbedding.length > 0) {
-    const scoredMemories = activeMemories
-      .map(mem => {
-        const similarity = mem.embedding?.length > 0
-          ? computeCosineSimilarity(queryEmbedding, mem.embedding)
-          : 0;
-        return {
-          ...mem,
-          similarityScore: Number(similarity.toFixed(4)),
-          searchMethod: 'cosine_fallback',
-        };
-      })
-      .filter(mem => mem.similarityScore >= similarityThreshold)
-      .sort((a, b) => b.similarityScore - a.similarityScore)
-      .slice(0, topK);
+  // Extract query keywords (ignoring short stopwords)
+  const stopWords = new Set(['what', 'which', 'who', 'where', 'when', 'why', 'how', 'the', 'and', 'for', 'are', 'you', 'can', 'about', 'did', 'have', 'tell']);
+  const queryWords = cleanQuery.split(/\W+/).filter(w => w.length > 2 && !stopWords.has(w));
 
-    return scoredMemories;
+  const scoredMemories = activeMemories.map(mem => {
+    // 1. Vector similarity score
+    let vectorScore = 0;
+    if (queryEmbedding && mem.embedding?.length === queryEmbedding.length) {
+      vectorScore = computeCosineSimilarity(queryEmbedding, mem.embedding);
+    }
+
+    // 2. Lexical / Keyword overlap score
+    let keywordScore = 0;
+    if (queryWords.length > 0) {
+      const cLower = mem.content.toLowerCase();
+      const tagsLower = (mem.tags || []).join(' ').toLowerCase();
+
+      for (const word of queryWords) {
+        if (cLower.includes(word)) keywordScore += 0.35;
+        if (tagsLower.includes(word)) keywordScore += 0.25;
+      }
+      keywordScore = Math.min(keywordScore, 1.0);
+    }
+
+    // 3. Profile relevance bonus for self-referential queries
+    let profileBonus = 0;
+    if (isProfileRecall) {
+      if (['personal', 'work', 'preference', 'goal'].includes(mem.category)) {
+        profileBonus = 0.35;
+      }
+    }
+
+    // 4. Combined final score
+    let finalScore = 0;
+    let method = 'cosine_fallback';
+
+    if (vectorScore > 0) {
+      finalScore = Math.max(vectorScore, (vectorScore * 0.7) + (keywordScore * 0.3)) + profileBonus;
+      method = isProfileRecall ? 'hybrid_profile_vector' : 'hybrid_vector';
+    } else if (keywordScore > 0) {
+      finalScore = keywordScore + profileBonus;
+      method = 'keyword_lexical';
+    } else if (isProfileRecall) {
+      finalScore = 0.60 + profileBonus;
+      method = 'profile_recall_fallback';
+    }
+
+    return {
+      ...mem,
+      vectorScore: Number(vectorScore.toFixed(4)),
+      similarityScore: Number(Math.min(finalScore, 1.0).toFixed(4)),
+      searchMethod: method,
+    };
+  });
+
+  // Effective cutoff threshold
+  const effectiveThreshold = isProfileRecall ? 0.35 : Math.min(similarityThreshold, 0.45);
+
+  let eligible = scoredMemories
+    .filter(mem => mem.similarityScore >= effectiveThreshold)
+    .sort((a, b) => b.similarityScore - a.similarityScore);
+
+  // If profile recall requested and nothing passed threshold, return top active profile memories
+  if (isProfileRecall && eligible.length === 0) {
+    eligible = scoredMemories
+      .sort((a, b) => b.similarityScore - a.similarityScore);
   }
 
-  // Strategy 3: Text / Keyword Fallback if no embedding is available
-  if (queryText) {
-    const lower = queryText.toLowerCase();
-    const scored = activeMemories
-      .map(mem => {
-        let score = 0;
-        const cLower = mem.content.toLowerCase();
-        if (cLower.includes(lower)) score += 0.8;
-        if (mem.tags?.some(t => lower.includes(t.toLowerCase()))) score += 0.5;
-        return {
-          ...mem,
-          similarityScore: Number(Math.min(score, 1).toFixed(4)),
-          searchMethod: 'keyword_fallback',
-        };
-      })
-      .filter(m => m.similarityScore > 0)
-      .sort((a, b) => b.similarityScore - a.similarityScore)
-      .slice(0, topK);
-
-    return scored;
-  }
-
-  return activeMemories.slice(0, topK).map(m => ({ ...m, similarityScore: 0.8, searchMethod: 'recent_fallback' }));
+  return eligible.slice(0, topK);
 };
 

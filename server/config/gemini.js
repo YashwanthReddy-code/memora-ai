@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import mongoose from 'mongoose';
 import Setting from '../models/Setting.js';
 
 let cachedGenAI = null;
@@ -113,8 +114,8 @@ export const resolveSupportedModel = async (apiKey, requestedModel = null) => {
   const candidatePreferences = [
     requestedModel,
     process.env.GEMINI_MODEL,
-    'gemini-flash-latest',
     'gemini-flash-lite-latest',
+    'gemini-flash-latest',
     'gemini-2.5-flash-lite',
     'gemini-3.5-flash',
     'gemini-3.1-flash-lite',
@@ -169,16 +170,18 @@ export const getGeminiClient = async () => {
   let apiKey = process.env.GEMINI_API_KEY?.trim();
   let requestedModel = process.env.GEMINI_MODEL?.trim() || 'gemini-flash-latest';
 
-  try {
-    const dbSetting = await Setting.findOne({ userId: 'default_user' });
-    if (dbSetting?.geminiApiKey?.trim()) {
-      apiKey = dbSetting.geminiApiKey.trim();
+  if (mongoose.connection?.readyState === 1) {
+    try {
+      const dbSetting = await Setting.findOne({ userId: 'default_user' });
+      if (dbSetting?.geminiApiKey?.trim()) {
+        apiKey = dbSetting.geminiApiKey.trim();
+      }
+      if (dbSetting?.geminiModel?.trim()) {
+        requestedModel = dbSetting.geminiModel.trim();
+      }
+    } catch (err) {
+      // If DB is offline, continue with process.env
     }
-    if (dbSetting?.geminiModel?.trim()) {
-      requestedModel = dbSetting.geminiModel.trim();
-    }
-  } catch (err) {
-    // If DB is offline, continue with process.env
   }
 
   if (!apiKey) {
