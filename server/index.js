@@ -1,4 +1,10 @@
 import 'dotenv/config';
+import dns from 'dns';
+
+// Fallback to Google DNS to resolve MongoDB Atlas SRV records
+try {
+  dns.setServers(['8.8.8.8', '8.8.4.4']);
+} catch (e) {}
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
