@@ -19,19 +19,30 @@ export const connectDB = async (customUri = null) => {
 
   if (uri && (uri.startsWith('mongodb://') || uri.startsWith('mongodb+srv://'))) {
     try {
-      console.log('Connecting to MongoDB at configured URI...');
+      const isAtlas = uri.includes('mongodb+srv://') || uri.includes('.mongodb.net');
+      const targetLabel = isAtlas ? 'MongoDB Atlas' : 'Remote MongoDB';
+      console.log(`Connecting to ${targetLabel}...`);
+
       await mongoose.connect(uri, {
-        serverSelectionTimeoutMS: 8000,
+        dbName: 'memora_ai',
+        serverSelectionTimeoutMS: 10000,
       });
-      dbSource = uri.includes('mongodb+srv://') ? 'MongoDB Atlas' : 'Remote MongoDB';
-      console.log(`Connected successfully to ${dbSource}: ${mongoose.connection.name}`);
+
+      dbSource = isAtlas ? 'MongoDB Atlas' : 'Remote MongoDB';
+      console.log(`===============================================`);
+      console.log(`  Connected successfully to ${dbSource}`);
+      console.log(`  Database Name: ${mongoose.connection.name}`);
+      console.log(`  Cluster Host:  ${mongoose.connection.host}`);
+      console.log(`===============================================`);
     } catch (err) {
-      console.error('Failed to connect to configured MONGODB_URI:', err.message);
-      console.log('Starting persistent local MongoDB instance...');
-      await startEmbeddedMongo();
+      console.error(`\n[FATAL] Failed to connect to MongoDB Atlas at MONGODB_URI:`);
+      console.error(`Error: ${err.message}`);
+      console.error(`Action required: Verify database user credentials, cluster URI, and Network Access (IP Whitelist 0.0.0.0/0) in MongoDB Atlas.\n`);
+      // Do NOT silently fall back to Embedded MongoDB when MONGODB_URI is specified
+      throw new Error(`MongoDB Atlas Connection Failed: ${err.message}`);
     }
   } else {
-    console.log('No external MONGODB_URI provided. Starting persistent local MongoDB instance...');
+    console.log('No external MONGODB_URI provided in server/.env. Starting persistent local MongoDB instance for development...');
     await startEmbeddedMongo();
   }
 
@@ -183,12 +194,13 @@ export const testMongoConnection = async (testUri) => {
   let testConn = null;
   try {
     testConn = await mongoose.createConnection(testUri.trim(), {
-      serverSelectionTimeoutMS: 6000,
-      connectTimeoutMS: 6000,
+      dbName: 'memora_ai',
+      serverSelectionTimeoutMS: 10000,
+      connectTimeoutMS: 10000,
     }).asPromise();
 
     const isAtlas = testUri.includes('mongodb+srv://') || testUri.includes('.mongodb.net');
-    const dbName = testConn.name || 'test';
+    const dbName = testConn.name || 'memora_ai';
 
     await testConn.close();
 
@@ -230,10 +242,11 @@ export const switchDatabaseConnection = async (newUri) => {
 
   // 3. Connect to new URI
   await mongoose.connect(newUri.trim(), {
-    serverSelectionTimeoutMS: 8000,
+    dbName: 'memora_ai',
+    serverSelectionTimeoutMS: 10000,
   });
 
-  dbSource = newUri.includes('mongodb+srv://') ? 'MongoDB Atlas' : 'Remote MongoDB';
+  dbSource = newUri.includes('mongodb+srv://') || newUri.includes('.mongodb.net') ? 'MongoDB Atlas' : 'Remote MongoDB';
   setupChangeStreams();
   startTtlExpirationScanner();
 
