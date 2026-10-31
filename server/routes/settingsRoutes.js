@@ -1,9 +1,23 @@
 import express from 'express';
 import Setting from '../models/Setting.js';
-import { testGeminiConnection } from '../config/gemini.js';
-import mongoose from 'mongoose';
+import { testGeminiConnection, resetGeminiCache } from '../config/gemini.js';
+import { testMongoConnection, switchDatabaseConnection, getDatabaseStatus } from '../config/db.js';
+import { updateEnvVariables } from '../utils/envHelper.js';
 
 const router = express.Router();
+
+const maskString = (str) => {
+  if (!str || typeof str !== 'string') return '';
+  const clean = str.trim();
+  if (clean.length <= 8) return '••••••••';
+  return `${clean.slice(0, 4)}••••${clean.slice(-4)}`;
+};
+
+const maskMongoUri = (uri) => {
+  if (!uri || typeof uri !== 'string') return '';
+  // Hide password in mongodb+srv://username:password@cluster...
+  return uri.replace(/(:\/\/)([^:]+):([^@]+)@/, '$1$2:••••••••@');
+};
 
 /**
  * GET /api/settings
@@ -13,21 +27,31 @@ router.get('/', async (req, res) => {
     const { userId = 'default_user' } = req.query;
     let setting = await Setting.findOne({ userId });
 
+    const envApiKey = process.env.GEMINI_API_KEY?.trim() || '';
+    const envMongoUri = process.env.MONGODB_URI?.trim() || '';
+
     if (!setting) {
       setting = await Setting.create({
         userId,
-        geminiApiKey: process.env.GEMINI_API_KEY || '',
+        geminiApiKey: envApiKey,
         geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
         embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-004',
         similarityThreshold: parseFloat(process.env.SIMILARITY_THRESHOLD) || 0.65,
         topK: parseInt(process.env.TOP_K_MEMORIES) || 5,
+        defaultTtlHours: parseInt(process.env.DEFAULT_TTL_HOURS) || 0,
       });
     }
 
+    const effectiveApiKey = setting.geminiApiKey || envApiKey;
+    const effectiveMongoUri = envMongoUri;
+
     res.json({
       userId: setting.userId,
-      geminiApiKeyMasked: setting.geminiApiKey ? `${setting.geminiApiKey.slice(0, 6)}...${setting.geminiApiKey.slice(-4)}` : '',
-      hasGeminiApiKey: Boolean(setting.geminiApiKey || process.env.GEMINI_API_KEY),
+      geminiApiKeyMasked: maskString(effectiveApiKey),
+      hasGeminiApiKey: Boolean(effectiveApiKey),
+      mongodbUriMasked: maskMongoUri(effectiveMongoUri),
+      hasMongodbUri: Boolean(effectiveMongoUri),
+      databaseStatus: getDatabaseStatus(),
       geminiModel: setting.geminiModel,
       embeddingModel: setting.embeddingModel,
       similarityThreshold: setting.similarityThreshold,
@@ -43,6 +67,7 @@ router.get('/', async (req, res) => {
 
 /**
  * PUT /api/settings
+ * Saves to DB and persists variables to server/.env so settings survive restarts!
  */
 router.put('/', async (req, res) => {
   try {
@@ -53,22 +78,56 @@ router.put('/', async (req, res) => {
       setting = new Setting({ userId });
     }
 
-    if (updates.geminiApiKey !== undefined) {
+    const envUpdates = {};
+
+    // 1. Gemini API Key
+    if (updates.geminiApiKey !== undefined && updates.geminiApiKey.trim() !== '') {
       setting.geminiApiKey = updates.geminiApiKey.trim();
+      envUpdates.GEMINI_API_KEY = updates.geminiApiKey.trim();
+      resetGeminiCache();
     }
-    if (updates.geminiModel) setting.geminiModel = updates.geminiModel;
+
+    // 2. MongoDB URI
+    let dbSwitchResult = null;
+    if (updates.mongodbUri !== undefined && updates.mongodbUri.trim() !== '') {
+      const cleanUri = updates.mongodbUri.trim();
+      dbSwitchResult = await switchDatabaseConnection(cleanUri);
+      envUpdates.MONGODB_URI = cleanUri;
+    }
+
+    // 3. Other Settings
+    if (updates.geminiModel) {
+      setting.geminiModel = updates.geminiModel;
+      envUpdates.GEMINI_MODEL = updates.geminiModel;
+    }
     if (updates.embeddingModel) setting.embeddingModel = updates.embeddingModel;
-    if (updates.similarityThreshold !== undefined) setting.similarityThreshold = parseFloat(updates.similarityThreshold);
-    if (updates.topK !== undefined) setting.topK = parseInt(updates.topK);
-    if (updates.defaultTtlHours !== undefined) setting.defaultTtlHours = parseInt(updates.defaultTtlHours);
+    if (updates.similarityThreshold !== undefined) {
+      setting.similarityThreshold = parseFloat(updates.similarityThreshold);
+      envUpdates.SIMILARITY_THRESHOLD = updates.similarityThreshold;
+    }
+    if (updates.topK !== undefined) {
+      setting.topK = parseInt(updates.topK);
+      envUpdates.TOP_K_MEMORIES = updates.topK;
+    }
+    if (updates.defaultTtlHours !== undefined) {
+      setting.defaultTtlHours = parseInt(updates.defaultTtlHours);
+      envUpdates.DEFAULT_TTL_HOURS = updates.defaultTtlHours;
+    }
     if (updates.autoExtract !== undefined) setting.autoExtract = Boolean(updates.autoExtract);
     if (updates.systemPersona !== undefined) setting.systemPersona = updates.systemPersona;
 
     await setting.save();
 
+    // Persist to server/.env
+    if (Object.keys(envUpdates).length > 0) {
+      await updateEnvVariables(envUpdates);
+    }
+
     res.json({
       success: true,
-      message: 'Settings saved successfully',
+      message: 'Settings saved and persisted successfully!',
+      databaseSwitched: Boolean(dbSwitchResult),
+      databaseStatus: getDatabaseStatus(),
       setting: {
         userId: setting.userId,
         hasGeminiApiKey: Boolean(setting.geminiApiKey || process.env.GEMINI_API_KEY),
@@ -82,6 +141,7 @@ router.put('/', async (req, res) => {
       },
     });
   } catch (err) {
+    console.error('[Settings PUT Error]:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -99,5 +159,17 @@ router.post('/test-gemini', async (req, res) => {
   }
 });
 
-export default router;
+/**
+ * POST /api/settings/test-mongodb
+ */
+router.post('/test-mongodb', async (req, res) => {
+  try {
+    const { uri } = req.body;
+    const result = await testMongoConnection(uri);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
+export default router;

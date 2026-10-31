@@ -86,6 +86,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apiKey }),
     }).then(handleResponse),
+  testMongoDB: (uri) =>
+    fetch(`${API_BASE}/settings/test-mongodb`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uri }),
+    }).then(handleResponse),
 
   // Demo & Seeding
   seedData: () =>

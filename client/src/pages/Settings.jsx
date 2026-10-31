@@ -13,19 +13,30 @@ import {
   Copy,
   ExternalLink,
   Save,
+  RefreshCw,
+  HardDrive,
 } from 'lucide-react';
 
 export const Settings = () => {
   const { stats, triggerRefresh, addNotification } = useApp();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Gemini state
   const [testingGemini, setTestingGemini] = useState(false);
   const [geminiTestResult, setGeminiTestResult] = useState(null);
-
-  // Form State
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [hasExistingKey, setHasExistingKey] = useState(false);
   const [geminiModel, setGeminiModel] = useState('gemini-1.5-flash');
+
+  // MongoDB state
+  const [mongodbUri, setMongodbUri] = useState('');
+  const [hasExistingMongoUri, setHasExistingMongoUri] = useState(false);
+  const [testingMongo, setTestingMongo] = useState(false);
+  const [mongoTestResult, setMongoTestResult] = useState(null);
+  const [databaseSource, setDatabaseSource] = useState('none');
+
+  // Retrieval & persona state
   const [similarityThreshold, setSimilarityThreshold] = useState(0.65);
   const [topK, setTopK] = useState(5);
   const [defaultTtlHours, setDefaultTtlHours] = useState(0);
@@ -42,6 +53,8 @@ export const Settings = () => {
         setLoading(true);
         const data = await api.getSettings();
         setHasExistingKey(data.hasGeminiApiKey);
+        setHasExistingMongoUri(data.hasMongodbUri);
+        setDatabaseSource(data.databaseStatus?.source || 'none');
         setGeminiModel(data.geminiModel || 'gemini-1.5-flash');
         setSimilarityThreshold(data.similarityThreshold ?? 0.65);
         setTopK(data.topK ?? 5);
@@ -64,8 +77,9 @@ export const Settings = () => {
     e?.preventDefault();
     try {
       setSaving(true);
-      await api.updateSettings({
-        geminiApiKey: geminiApiKey || undefined,
+      const res = await api.updateSettings({
+        geminiApiKey: geminiApiKey.trim() || undefined,
+        mongodbUri: mongodbUri.trim() || undefined,
         geminiModel,
         similarityThreshold,
         topK,
@@ -74,10 +88,17 @@ export const Settings = () => {
         systemPersona,
       });
 
-      addNotification('Settings saved successfully!', 'success');
+      addNotification(res.message || 'Settings saved and persisted!', 'success');
       if (geminiApiKey) {
         setHasExistingKey(true);
         setGeminiApiKey('');
+      }
+      if (mongodbUri) {
+        setHasExistingMongoUri(true);
+        setMongodbUri('');
+        if (res.databaseStatus?.source) {
+          setDatabaseSource(res.databaseStatus.source);
+        }
       }
       triggerRefresh();
     } catch (err) {
@@ -103,6 +124,25 @@ export const Settings = () => {
       addNotification(err.message, 'error');
     } finally {
       setTestingGemini(false);
+    }
+  };
+
+  const handleTestMongo = async () => {
+    try {
+      setTestingMongo(true);
+      setMongoTestResult(null);
+      const res = await api.testMongoDB(mongodbUri);
+      setMongoTestResult(res);
+      if (res.success) {
+        addNotification(res.message || 'MongoDB connection verified!', 'success');
+      } else {
+        addNotification(`MongoDB connection failed: ${res.message}`, 'error');
+      }
+    } catch (err) {
+      setMongoTestResult({ success: false, message: err.message });
+      addNotification(err.message, 'error');
+    } finally {
+      setTestingMongo(false);
     }
   };
 
@@ -168,14 +208,77 @@ export const Settings = () => {
     <div className="space-y-8 pb-16 max-w-4xl mx-auto">
       {/* Header */}
       <div>
-        <h2 className="text-xl font-bold text-white tracking-tight">System Configuration</h2>
+        <h2 className="text-xl font-bold text-white tracking-tight">System Configuration & Persistence</h2>
         <p className="text-xs text-slate-400 mt-1">
-          Tune agentic memory extraction, vector thresholds, Gemini LLM connection, and MongoDB Atlas settings.
+          Configure real MongoDB Atlas credentials, Google Gemini API keys, vector thresholds, and disk persistence.
         </p>
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">
-        {/* Gemini API Key Configuration Card */}
+        {/* 1. MongoDB Atlas Configuration Card */}
+        <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+                <Database className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-white">MongoDB Connection & Persistence</h3>
+                <p className="text-xs text-slate-400">
+                  Current Database: <strong className="text-emerald-400 font-mono">{databaseSource}</strong>
+                </p>
+              </div>
+            </div>
+            {hasExistingMongoUri ? (
+              <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                MongoDB Atlas Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-full border border-cyan-500/20 font-medium">
+                <HardDrive className="w-3.5 h-3.5" />
+                Local Disk Persistent Mode
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              MongoDB Connection String (Atlas URI)
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={mongodbUri}
+                onChange={(e) => setMongodbUri(e.target.value)}
+                placeholder="mongodb+srv://<username>:<password>@cluster0.mongodb.net/memora_ai?retryWrites=true&w=majority"
+                className="flex-1 px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-600 text-xs focus:outline-none focus:border-emerald-500 font-mono"
+              />
+              <button
+                type="button"
+                onClick={handleTestMongo}
+                disabled={testingMongo || !mongodbUri.trim()}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors disabled:opacity-50 shrink-0"
+              >
+                {testingMongo ? 'Testing...' : 'Test Connection'}
+              </button>
+            </div>
+            {mongoTestResult && (
+              <p
+                className={`text-xs font-mono mt-1 ${
+                  mongoTestResult.success ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                {mongoTestResult.message}
+              </p>
+            )}
+            <p className="text-[11px] text-slate-500">
+              Leave blank to use the built-in local persistent MongoDB instance (saved to disk in <code>server/data/db</code>).
+            </p>
+          </div>
+        </div>
+
+        {/* 2. Gemini API Key Configuration Card */}
         <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -184,25 +287,25 @@ export const Settings = () => {
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-white">Google Gemini API</h3>
-                <p className="text-xs text-slate-400">Powers agentic extraction, embeddings, and chat completions</p>
+                <p className="text-xs text-slate-400">Powers cloud generative responses and text-embedding-004</p>
               </div>
             </div>
             {hasExistingKey ? (
               <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20 font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                API Key Configured
+                API Key Active
               </span>
             ) : (
               <span className="flex items-center gap-1.5 text-xs text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20 font-medium">
                 <AlertCircle className="w-3.5 h-3.5" />
-                Simulation Mode
+                Offline Intelligence Mode
               </span>
             )}
           </div>
 
           <div className="space-y-2">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-              {hasExistingKey ? 'Update API Key (Leave blank to keep existing)' : 'Gemini API Key *'}
+              {hasExistingKey ? 'Update API Key (Leave blank to keep existing active key)' : 'Gemini API Key *'}
             </label>
             <div className="flex gap-2">
               <input
@@ -216,7 +319,7 @@ export const Settings = () => {
                 type="button"
                 onClick={handleTestGemini}
                 disabled={testingGemini || (!geminiApiKey && !hasExistingKey)}
-                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors disabled:opacity-50"
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors disabled:opacity-50 shrink-0"
               >
                 {testingGemini ? 'Testing...' : 'Test Connection'}
               </button>
@@ -242,8 +345,9 @@ export const Settings = () => {
                 onChange={(e) => setGeminiModel(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none focus:border-indigo-500"
               >
-                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast & Low Latency)</option>
+                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Recommended)</option>
                 <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep Reasoning)</option>
               </select>
             </div>
@@ -259,7 +363,7 @@ export const Settings = () => {
           </div>
         </div>
 
-        {/* Memory Retrieval & Vector Search Tuning */}
+        {/* 3. Memory Retrieval & Vector Search Tuning */}
         <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-5">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
@@ -329,7 +433,7 @@ export const Settings = () => {
             <div>
               <span className="text-xs font-semibold text-slate-200 block">Autonomous Memory Extraction</span>
               <span className="text-[11px] text-slate-500">
-                Automatically extract and update memories from each conversational turn
+                Automatically extract, index, and resolve conflicts from each conversational turn
               </span>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -357,7 +461,7 @@ export const Settings = () => {
           </div>
         </div>
 
-        {/* MongoDB Atlas & Vector Search Guide Card */}
+        {/* 4. MongoDB Atlas Vector Search Guide Card */}
         <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -407,7 +511,7 @@ export const Settings = () => {
             className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
-            <span>{saving ? 'Saving...' : 'Save Configuration'}</span>
+            <span>{saving ? 'Saving...' : 'Save & Persist Configuration'}</span>
           </button>
         </div>
       </form>
@@ -445,4 +549,3 @@ export const Settings = () => {
     </div>
   );
 };
-

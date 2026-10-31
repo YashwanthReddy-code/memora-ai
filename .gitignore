@@ -3,6 +3,10 @@ node_modules/
 client/node_modules/
 server/node_modules/
 
+# Local database storage
+data/
+server/data/
+
 # Production builds
 dist/
 client/dist/
@@ -31,3 +35,4 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
