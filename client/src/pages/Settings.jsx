@@ -27,7 +27,7 @@ export const Settings = () => {
   const [geminiTestResult, setGeminiTestResult] = useState(null);
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [hasExistingKey, setHasExistingKey] = useState(false);
-  const [geminiModel, setGeminiModel] = useState('gemini-1.5-flash');
+  const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash');
 
   // MongoDB state
   const [mongodbUri, setMongodbUri] = useState('');
@@ -55,7 +55,7 @@ export const Settings = () => {
         setHasExistingKey(data.hasGeminiApiKey);
         setHasExistingMongoUri(data.hasMongodbUri);
         setDatabaseSource(data.databaseStatus?.source || 'none');
-        setGeminiModel(data.geminiModel || 'gemini-1.5-flash');
+        setGeminiModel(data.geminiModel || 'gemini-2.5-flash');
         setSimilarityThreshold(data.similarityThreshold ?? 0.65);
         setTopK(data.topK ?? 5);
         setDefaultTtlHours(data.defaultTtlHours ?? 0);
@@ -112,12 +112,15 @@ export const Settings = () => {
     try {
       setTestingGemini(true);
       setGeminiTestResult(null);
-      const res = await api.testGemini(geminiApiKey || undefined);
+      const res = await api.testGemini(geminiApiKey || undefined, geminiModel);
       setGeminiTestResult(res);
       if (res.success) {
-        addNotification('Gemini API verified successfully!', 'success');
+        if (res.verifiedModel) {
+          setGeminiModel(res.verifiedModel);
+        }
+        addNotification(res.message || 'Gemini API verified successfully!', 'success');
       } else {
-        addNotification(`Gemini Test Failed: ${res.message}`, 'error');
+        addNotification(`Gemini Test: ${res.message}`, 'error');
       }
     } catch (err) {
       setGeminiTestResult({ success: false, message: err.message });
@@ -345,10 +348,12 @@ export const Settings = () => {
                 onChange={(e) => setGeminiModel(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none focus:border-indigo-500"
               >
-                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Recommended)</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended - Stable & Fast)</option>
                 <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep Reasoning)</option>
+                <option value="gemini-1.5-flash-latest">Gemini 1.5 Flash Latest</option>
+                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
+                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
               </select>
             </div>
 

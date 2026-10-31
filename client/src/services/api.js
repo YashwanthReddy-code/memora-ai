@@ -80,11 +80,11 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     }).then(handleResponse),
-  testGemini: (apiKey) =>
+  testGemini: (apiKey, model) =>
     fetch(`${API_BASE}/settings/test-gemini`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey }),
+      body: JSON.stringify({ apiKey, model }),
     }).then(handleResponse),
   testMongoDB: (uri) =>
     fetch(`${API_BASE}/settings/test-mongodb`, {

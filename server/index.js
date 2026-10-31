@@ -61,10 +61,10 @@ app.get('*', (req, res, next) => {
 const startServer = async () => {
   try {
     await connectDB();
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`===============================================`);
       console.log(`  MEMORA AI Web Application running on port ${PORT}`);
-      console.log(`  App URL:      http://localhost:${PORT}`);
+      console.log(`  App URL:      http://localhost:${PORT} or http://127.0.0.1:${PORT}`);
       console.log(`  Health Check: http://localhost:${PORT}/api/health`);
       console.log(`  Live SSE:     http://localhost:${PORT}/api/stream`);
       console.log(`===============================================`);

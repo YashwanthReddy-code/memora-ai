@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
       setting = await Setting.create({
         userId,
         geminiApiKey: envApiKey,
-        geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+        geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
         embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-004',
         similarityThreshold: parseFloat(process.env.SIMILARITY_THRESHOLD) || 0.65,
         topK: parseInt(process.env.TOP_K_MEMORIES) || 5,
@@ -151,8 +151,8 @@ router.put('/', async (req, res) => {
  */
 router.post('/test-gemini', async (req, res) => {
   try {
-    const { apiKey } = req.body;
-    const result = await testGeminiConnection(apiKey);
+    const { apiKey, model } = req.body;
+    const result = await testGeminiConnection(apiKey, model);
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

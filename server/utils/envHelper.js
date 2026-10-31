@@ -56,3 +56,4 @@ export const updateEnvVariables = async (updates = {}) => {
     return false;
   }
 };
+

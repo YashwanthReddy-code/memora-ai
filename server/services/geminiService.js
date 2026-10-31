@@ -1,7 +1,6 @@
-import { getGeminiClient } from '../config/gemini.js';
+import { getGeminiClient, resolveSupportedModel } from '../config/gemini.js';
 
 // Enhanced deterministic fallback embedding generator (768 dimensions)
-// Uses n-grams and term hashing for improved keyword/semantic overlap
 const generateFallbackEmbedding = (text) => {
   const embedding = new Array(768).fill(0);
   const clean = text.toLowerCase().trim();
@@ -15,26 +14,23 @@ const generateFallbackEmbedding = (text) => {
     }
     const idx = Math.abs(hash) % 768;
     embedding[idx] += 1.0;
-    // Word bigram hash
     if (i > 0) {
       const biHash = (hash ^ words[i - 1].length) % 768;
       embedding[Math.abs(biHash)] += 0.5;
     }
   }
 
-  // Also include character trigram hashing
   for (let i = 0; i < clean.length - 2; i++) {
     const triCode = (clean.charCodeAt(i) * 31 + clean.charCodeAt(i + 1)) * 31 + clean.charCodeAt(i + 2);
     embedding[Math.abs(triCode) % 768] += 0.1;
   }
 
-  // Normalize vector to unit length
   const norm = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0)) || 1;
   return embedding.map(val => Number((val / norm).toFixed(6)));
 };
 
 /**
- * Generate 768-dimensional vector embedding for a given text
+ * Generate 768-dimensional vector embedding for a given text using text-embedding-004
  */
 export const generateEmbedding = async (text) => {
   if (!text || typeof text !== 'string') return generateFallbackEmbedding('empty');
@@ -52,7 +48,7 @@ export const generateEmbedding = async (text) => {
     }
     return generateFallbackEmbedding(text);
   } catch (err) {
-    console.warn(`[Gemini Embedding Warning] Falling back to local vector: ${err.message}`);
+    console.warn(`[Gemini Embedding Notice] Falling back to local vector representation: ${err.message}`);
     return generateFallbackEmbedding(text);
   }
 };
@@ -61,7 +57,7 @@ export const generateEmbedding = async (text) => {
  * Extract atomic memories, categories, confidence, and conflict detection from chat turn
  */
 export const extractMemoriesFromTurn = async (userMessage, assistantMessage = '', existingActiveMemories = []) => {
-  const { client, isConfigured, modelName } = await getGeminiClient();
+  const { client, isConfigured, modelName, apiKey } = await getGeminiClient();
 
   const existingMemorySummary = existingActiveMemories.map(m => `- [ID: ${m._id}] (${m.category}) ${m.content}`).join('\n');
 
@@ -104,20 +100,37 @@ JSON Schema:
 ]`;
 
   try {
-    const model = client.getGenerativeModel({
-      model: modelName || 'gemini-1.5-flash',
+    let activeModel = modelName || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    let model = client.getGenerativeModel({
+      model: activeModel,
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.2,
       },
     });
 
-    const response = await model.generateContent(prompt);
+    let response;
+    try {
+      response = await model.generateContent(prompt);
+    } catch (modelErr) {
+      if (modelErr.message?.includes('not found') || modelErr.message?.includes('404')) {
+        // Resolve available model dynamically
+        const newModel = await resolveSupportedModel(apiKey);
+        model = client.getGenerativeModel({
+          model: newModel,
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+        });
+        response = await model.generateContent(prompt);
+      } else {
+        throw modelErr;
+      }
+    }
+
     const rawText = response.response.text();
     const parsed = JSON.parse(rawText);
     return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
-    console.warn(`[Gemini Extraction Warning]: ${err.message}. Falling back to heuristic extraction.`);
+    console.warn(`[Gemini Extraction Notice]: ${err.message}. Running heuristic extraction.`);
     return heuristicExtraction(userMessage, existingActiveMemories);
   }
 };
@@ -176,8 +189,7 @@ const heuristicExtraction = (text, existingMemories = []) => {
 };
 
 /**
- * Intelligent local knowledge responder for offline simulation mode
- * Produces substantive technical and conversational answers instead of generic boilerplate
+ * Intelligent local knowledge responder used ONLY when no API key is configured
  */
 const generateSubstantiveOfflineResponse = (userMessage, retrievedMemories = []) => {
   const lower = userMessage.toLowerCase();
@@ -185,7 +197,6 @@ const generateSubstantiveOfflineResponse = (userMessage, retrievedMemories = [])
     ? `*(Recalled context: ${retrievedMemories.map(m => m.content).join('; ')})*\n\n`
     : '';
 
-  // 1. Inheritance in C++
   if (lower.includes('inheritance') && (lower.includes('c++') || lower.includes('cpp'))) {
     return `${memoryPrefix}**Inheritance in C++** is a fundamental Object-Oriented Programming (OOP) mechanism that allows a derived class (child) to inherit properties and behaviors from a base class (parent).
 
@@ -230,33 +241,6 @@ int main() {
 > *Note: Connect your Gemini API Key in Settings for live cloud generative responses.*`;
   }
 
-  // 2. Coffee / Food / Recommendations with Location / Allergy memory personalization
-  if (lower.includes('coffee') || lower.includes('restaurant') || lower.includes('food') || lower.includes('dinner') || lower.includes('eat')) {
-    const seattleMem = retrievedMemories.find(m => m.content.toLowerCase().includes('seattle'));
-    const allergyMem = retrievedMemories.find(m => m.content.toLowerCase().includes('allerg'));
-    const loc = seattleMem ? 'Seattle' : 'your area';
-
-    return `${memoryPrefix}Here are top recommendations tailored for you in **${loc}**${allergyMem ? ' (accounting for your dietary allergy constraints)' : ''}:
-
-1. **Monorail Espresso (Downtown)**: Seattle's original espresso cart; fantastic pour-overs and nut-free oat milk options.
-2. **Victrola Coffee Roasters (Capitol Hill)**: Exceptional single-origin roasts with a great working atmosphere.
-3. **Ghost Alley Espresso (Pike Place)**: Quirky, authentic spot known for signature spiced espresso.
-
-All of these cafes provide clear allergen-safe menus. Let me know if you would like walking directions or specific roasting notes!`;
-  }
-
-  // 3. General programming / tech
-  if (lower.includes('typescript') || lower.includes('react') || lower.includes('javascript') || lower.includes('node')) {
-    return `${memoryPrefix}Here is a quick overview based on modern TypeScript and React standards:
-
-- **Type Safety**: Enforce strict interface and type definitions to catch bugs at compile-time.
-- **Component Architecture**: Keep components small, decoupled, and functional with custom React hooks.
-- **State Management**: Prefer atomic, localized state (React Context or Zustand) over monolithic stores for modularity.
-
-If you have a specific snippet or architectural pattern you'd like to refactor, paste it in and I'll analyze it!`;
-  }
-
-  // 4. Default informative response
   const memoryCitations = retrievedMemories.length > 0
     ? `I have incorporated your retrieved profile memories into this session:\n` +
       retrievedMemories.map(m => `- **${m.category}**: ${m.content}`).join('\n') + `\n\n`
@@ -264,11 +248,12 @@ If you have a specific snippet or architectural pattern you'd like to refactor, 
 
   return `${memoryCitations}I understand your query: "${userMessage}".
 
-Memora AI has recorded this conversational turn and verified your long-term memories in MongoDB. To unlock unlimited real-time generative responses for any topic, add your Gemini API Key in the **Settings** tab.`;
+Memora AI has recorded this conversational turn and verified your long-term memories in MongoDB. To unlock live cloud generative AI responses, configure your Gemini API Key in the **Settings** tab.`;
 };
 
 /**
  * Generate personalized assistant response with retrieved memory context
+ * When Gemini is configured, it returns genuine AI-generated responses, never silent mock fallbacks.
  */
 export const generatePersonalizedResponse = async (
   userMessage,
@@ -276,7 +261,19 @@ export const generatePersonalizedResponse = async (
   conversationHistory = [],
   systemPersona = ''
 ) => {
-  const { client, isConfigured, modelName } = await getGeminiClient();
+  const { client, isConfigured, modelName, apiKey, error: initError } = await getGeminiClient();
+
+  // If no Gemini key is provided, provide offline informative answer
+  if (!isConfigured || !client) {
+    if (initError) {
+      throw new Error(`Gemini Configuration Error: ${initError}`);
+    }
+    return {
+      text: generateSubstantiveOfflineResponse(userMessage, retrievedMemories),
+      usedOfflineSimulation: true,
+      modelUsed: 'offline-knowledge-engine',
+    };
+  }
 
   const memoryContext = retrievedMemories.length > 0
     ? `\nRELEVANT USER MEMORIES (Use these to personalize your response naturally):\n` +
@@ -287,41 +284,68 @@ export const generatePersonalizedResponse = async (
   const personaPrompt = systemPersona ||
     `You are Memora AI, an intelligent agent with persistent memory. You naturally recall relevant past details, preferences, and facts about the user.`;
 
-  if (!isConfigured || !client) {
-    return {
-      text: generateSubstantiveOfflineResponse(userMessage, retrievedMemories),
-      usedOfflineSimulation: true,
-    };
-  }
+  let activeModel = modelName || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
   try {
-    const activeModel = modelName || 'gemini-1.5-flash';
-    const model = client.getGenerativeModel({
+    let model = client.getGenerativeModel({
       model: activeModel,
       systemInstruction: `${personaPrompt}\n${memoryContext}`,
     });
 
-    // Format chat history for Gemini
     const history = conversationHistory.slice(-8).map(msg => ({
       role: msg.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: msg.content }],
     }));
 
-    const chat = model.startChat({ history });
-    const result = await chat.sendMessage(userMessage);
+    let chat = model.startChat({ history });
+    let result;
+
+    try {
+      result = await chat.sendMessage(userMessage);
+    } catch (sendErr) {
+      // If model 404s, attempt automatic resolution with Google's models.list API
+      if (sendErr.message?.includes('not found') || sendErr.message?.includes('404')) {
+        console.warn(`[Gemini Model Fallback] Model "${activeModel}" not found. Resolving available model...`);
+        const fallbackModel = await resolveSupportedModel(apiKey);
+        activeModel = fallbackModel;
+
+        model = client.getGenerativeModel({
+          model: activeModel,
+          systemInstruction: `${personaPrompt}\n${memoryContext}`,
+        });
+        chat = model.startChat({ history });
+        result = await chat.sendMessage(userMessage);
+      } else {
+        throw sendErr;
+      }
+    }
+
     const response = await result.response;
+    const responseText = response.text()?.trim();
+
+    if (!responseText) {
+      throw new Error('Gemini API returned an empty response.');
+    }
+
     return {
-      text: response.text().trim(),
+      text: responseText,
       usedOfflineSimulation: false,
+      modelUsed: activeModel,
     };
   } catch (err) {
-    console.error('[Gemini Generation Error]:', err.message);
-    // If cloud call fails, provide rich fallback response
-    return {
-      text: generateSubstantiveOfflineResponse(userMessage, retrievedMemories) +
-            `\n\n*(Note: Cloud call encountered an error: ${err.message}. Served via local intelligent engine).*`,
-      error: err.message,
-      usedOfflineSimulation: true,
-    };
+    console.error(`[Gemini API Error] Failed with model "${activeModel}":`, err.message);
+
+    // Map error codes to clean, actionable messages
+    let formattedError = err.message || 'Error communicating with Gemini API';
+    if (formattedError.includes('API key not valid') || formattedError.includes('API_KEY_INVALID')) {
+      formattedError = 'Invalid Gemini API Key. Please verify or update your key in Settings.';
+    } else if (formattedError.includes('RESOURCE_EXHAUSTED') || formattedError.includes('429')) {
+      formattedError = 'Gemini API quota exceeded or rate limit hit. Check your quota in Google Cloud Console.';
+    } else if (formattedError.includes('not found') || formattedError.includes('404')) {
+      formattedError = `Model "${activeModel}" is not available for your Gemini API version.`;
+    }
+
+    // Never silently return mock response when real API is configured; throw clear error
+    throw new Error(formattedError);
   }
 };

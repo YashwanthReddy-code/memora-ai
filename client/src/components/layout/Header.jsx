@@ -77,7 +77,7 @@ export const Header = () => {
           <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/80 text-xs">
             <Cpu className="w-3.5 h-3.5 text-indigo-400" />
             <span className="text-slate-300 font-mono text-[11px]">
-              {stats?.systemHealth?.gemini?.configured ? 'Gemini 1.5' : 'Gemini Offline Mode'}
+              {stats?.systemHealth?.gemini?.configured ? (stats?.systemHealth?.gemini?.model || 'Gemini Active') : 'Gemini Offline Mode'}
             </span>
           </div>
 
